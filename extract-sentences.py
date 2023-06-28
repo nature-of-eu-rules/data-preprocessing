@@ -40,7 +40,6 @@ BEGIN_PHRASES = [BEGIN_PHRASE_R1, BEGIN_PHRASE_R2, BEGIN_PHRASE_D1, BEGIN_PHRASE
 # Other constants
 EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force"]
 START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
-KNOWN_ATTR = ['director', 'directorate-general', 'director-general', 'directorates-general', 'member states', 'member state']
 END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
 DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
 DIGITS = '0123456789'
