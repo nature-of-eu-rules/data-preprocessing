@@ -202,7 +202,7 @@ def extract_summary(text):
     for sent in sent_list:
         tmp_sent = clean_sentence_pass1(sent)
         if is_valid_sentence(tmp_sent):
-            new_sent_list.append(tmp_sent)
+            new_sent_list.append(clean_sentence_pass2(tmp_sent))
 
     return '\n\n\n'.join(new_sent_list)
 
