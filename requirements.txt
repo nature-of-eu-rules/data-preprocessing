@@ -1,0 +1,6 @@
+pymupdf==1.22.5
+beautifulsoup4==4.12.2
+pandas==2.0.2
+lexnlp==2.3.0
+thefuzz==0.19.0
+python-Levenshtein==0.21.1
