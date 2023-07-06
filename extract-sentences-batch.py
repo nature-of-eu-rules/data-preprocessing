@@ -1,0 +1,537 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+"""
+Script to extract the regulatory section (as well as the sentences and metadata) of
+EU legislative documents (PDF / HTML) located on the EURLEX website. 
+Website: http://eur-lex.europa.eu/
+"""
+
+import fitz
+from bs4 import BeautifulSoup
+import pandas as pd
+from lexnlp.nlp.en.segments.sentences import get_sentence_list
+import string 
+from thefuzz import fuzz
+from thefuzz import process
+import os
+import re
+import time
+
+# Input
+PDF_DIR = "pdfs/"
+HTML_DIR = "htmls/"
+
+# Output
+OUT_DIR = "output-texts/" # Individual txt files
+OBL_FNAME = "legal_obl_datasheet.csv" # Sentences extracted from each document in a summary CSV sheet
+OBL_DIR = "output-result/" # Where to save CSV summary sheet
+
+# Dictionary of phrases which denote the start and end point
+# of relevant text in the documents
+
+BEGIN_PHRASE_R1 = "HAS ADOPTED THIS REGULATION"
+BEGIN_PHRASE_R2 = "HAVE ADOPTED THIS REGULATION"
+BEGIN_PHRASE_D1 = "HAS DECIDED AS FOLLOWS"
+BEGIN_PHRASE_D2 = "HAVE ADOPTED THIS DECISION"
+BEGIN_PHRASE_D3 = "HAS ADOPTED THIS DECISION"
+BEGIN_PHRASE_L = "HAS ADOPTED THIS DIRECTIVE"
+BEGIN_PHRASES = [BEGIN_PHRASE_R1, BEGIN_PHRASE_R2, BEGIN_PHRASE_D1, BEGIN_PHRASE_D2, BEGIN_PHRASE_D3, BEGIN_PHRASE_L]
+
+# Other constants
+EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning"]
+EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,']
+START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
+END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
+DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
+DIGITS = '0123456789'
+
+# BEGIN: function definitions
+
+def generate_batched_index_for_directory(DIR):
+    result = {}
+    with os.scandir(DIR) as iter:
+        for i, filename in enumerate(iter):
+            # only process legislative files in PDF or HTML format (CELEX code starts with '3')
+            if (filename.name.startswith('3') and (filename.name.endswith('.pdf') or filename.name.endswith('.html'))):
+                year = filename.name[1:5] # get the year of the document from the ID of the filename string 
+                if year in result:
+                    result[year].append(filename.name)  # append filename to index
+                else:
+                    result[year] = []                   # create new index entry for year
+                    result[year].append(filename.name)  # append filename to index
+
+    return result
+
+def generate_batched_index_of_data(PDF_DIR, HTML_DIR):
+    """ Generates an index of the documents to process based on year 
+
+            Generates 1 batch per document year.
+
+        Parameters
+        ----------
+
+        PDF_DIR : str,
+            path to pdf documents to process
+        HTML_DIR : str,
+            path to HTML documents to process
+
+        Returns
+        -------
+
+            a Python dict of the form {'year' : [list of filenames], ... , 'another_year' : [another list of filenames]}
+            where 'year' represents a year e.g. '2022' and '[list of filenames]' represents a list of PDF or HTML 
+            filenames to process (just filenames and not relative or absolute paths to files)
+
+    """
+
+    index_PDFs = generate_batched_index_for_directory(PDF_DIR)
+    index_HTMLs = generate_batched_index_for_directory(HTML_DIR)
+    merged_index = { key:index_PDFs.get(key,[])+index_HTMLs.get(key,[]) for key in set(list(index_PDFs.keys())+list(index_HTMLs.keys())) } # merge PDF and HTML file indexes
+    return merged_index
+
+
+def check_out_dir(data_dir):
+    """Check if directory for saving extracted text exists, make directory if not 
+
+        Parameters
+        ----------
+        data_dir: str
+            Output directory path.
+
+    """
+
+    if not os.path.isdir(data_dir):
+        os.makedirs(data_dir)
+        print(f"Created saving directory at {data_dir}")
+
+def get_index_of_next_upper_case_token(sent_tokens, start_index = 3):
+    """Gets index of first word (after the given start_index) in list of words
+      which starts with an uppercase character.
+
+        Parameters
+        ----------
+        sent_tokens: list
+            List of words.
+        start_index: int
+            the starting index from which the function starts searching
+
+        Returns
+        -------
+        i: int
+            the first index after start_index which has a word starting with an uppercase character
+
+    """
+    for i in range(start_index, len(sent_tokens)):
+        if sent_tokens[i][0].isupper():
+            return i
+    return -1
+
+def is_valid_sentence(sent_text):
+    """Determines whether a sentence in a text can possibly be regulatory.
+
+        Parameters
+        ----------
+        sent_text: str
+            The sentence.
+        
+        Returns
+        -------
+            True if the sentence could possibly be regulatory, False otherwise.
+
+    """
+    global DIGITS
+    global EXCLUDED_PHRASES
+    global EXCLUDED_START_PHRASES
+
+    is_valid = True
+    
+    # Rule 1: sentence should not start with any punctuation character (or numerical digit)
+    if sent_text[0] in (string.punctuation + DIGITS):
+        is_valid = False
+        
+    # Rule 2: check if 'EN Official Journal' or 'PAGE' occurs at start of sentence (this indicates an invalid sentence)
+    if sent_text.lower().strip().startswith('en official journal') or sent_text.strip().startswith('PAGE'):
+        is_valid = False
+        
+    # Rule 3: sentence must be at least 15 non-space characters long (otherwise highly unlikely to be a sentence)
+    if len(sent_text.replace(' ','')) < 15:
+        is_valid = False
+
+    # Rule 4: sentence must not include these phrases (these phrases indicate non-regulatory sentences)
+    for phrase in EXCLUDED_PHRASES:
+        if (phrase in sent_text.lower()) or (phrase in clean_sentence_pass2(sent_text).lower()):
+            is_valid = False
+
+    # Rule 5: sentence must not include these phrases AT THE START of the sentence        
+    for start_phrase in EXCLUDED_START_PHRASES:
+        if sent_text.lower().startswith(start_phrase):
+            is_valid = False
+        
+    return is_valid
+            
+def clean_sentence_pass2(sent):
+    """Formats a sentence to be more easily processed downstream for classifying them as regulatory or not.
+
+        Parameters
+        ----------
+        sent: str
+            The sentence.
+        
+        Returns
+        -------
+            The processed sentence.
+
+    """
+    global START_TOKENS
+
+    # Remove unncessary tokens at beginning of sentence e.g.
+    # "Article 4    Heading of Article... now starts the relevant part of the sentence"
+    sent_tokens = sent.split()
+    if sent_tokens[0].strip() in START_TOKENS:
+
+        if sent_tokens[1].strip().isnumeric():
+            if sent_tokens[2].strip()[0].isupper():
+                # find position / index of next upper case token in sent
+                i = get_index_of_next_upper_case_token(sent_tokens)
+                if i > 2:
+                    return ' '.join(sent_tokens[i:])
+                else:
+                    return ' '.join(sent_tokens[3:])
+            else:
+                return ' '.join(sent_tokens[2:])
+        else:
+            return ' '.join(sent_tokens)
+    else:
+        return ' '.join(sent_tokens)
+
+def clean_sentence_pass1(sent_text):
+    """Formats a sentence to be more easily processed downstream for classifying them as regulatory or not.
+
+        Parameters
+        ----------
+        sent: str
+            The sentence.
+        
+        Returns
+        -------
+            The processed sentence.
+
+    """
+    # Rule 1: remove ':' at the start of sentence (it is there because the begin_phrase sometimes includes ':' and sometimes not
+    if sent_text[0] == ':':
+        sent_text = sent_text[1:].strip()
+        
+    # Rule 2: remove regex 'Article [some number] C' where 'C' is a capital letter
+    done = False
+    while not done:
+        pattern = re.compile(r"\bArticle \s*\d\d?\d?[a-z]?\s*[A-Z]")
+        matches = re.findall(pattern, sent_text)
+        if len(matches) == 0:
+            done = True
+        else:
+            idx_lst_char = len(matches[0]) - 1
+            sent_text = sent_text.replace(matches[0], matches[0][idx_lst_char])
+
+    return sent_text.strip()
+    
+def extract_summary(text):
+    """Formats a text string for easy sentence tokenization and labelling / classification later.
+
+        Parameters
+        ----------
+        text: str
+            The input text.
+        
+        Returns
+        -------
+            Formatted text.
+
+    """
+    sent_list = get_sentence_list(text)
+    
+    new_sent_list = []
+    for sent in sent_list:
+        tmp_sent = clean_sentence_pass1(sent)
+        if is_valid_sentence(tmp_sent):
+            new_sent_list.append(clean_sentence_pass2(tmp_sent))
+
+    return '\n\n\n'.join(new_sent_list)
+
+def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
+    """ Extracts only the raw text of PDF document that occurs between the two given phrases. 
+        
+            Gives only the first occurrence
+        
+        Parameters
+        ----------
+        filename: str
+            Input filename string.
+        begin_phrases: list
+            List of string phrases which denote the starting marker of where to start
+            extracting text from in the PDF
+        end_phrases: list
+            List of string phrases which denote the ending marker of where to stop
+            extracting text from in the PDF
+        
+        Returns
+        -------
+            Extracted and formatted text from the input PDF file
+
+    """
+    
+    if filename.endswith('.pdf'):
+        text = ""
+        title = filename.split(".")[0].split("/")[-1]
+
+        with fitz.open(filename) as doc:
+            for page in doc:
+                current_page_text = page.get_text(sort=True)
+                text += current_page_text
+
+    for bphrase in begin_phrases:
+        for ephrase in end_phrases: 
+            pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL)
+            matches = re.findall(pattern, text)
+            if len(matches) > 0:
+                the_match = matches[0]
+                the_match = the_match.replace("\n", " ")
+                the_match = the_match.replace("­ ", "")
+                simpler_text = extract_summary(the_match)
+                return simpler_text
+        
+    return ''
+
+def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
+    """ Extracts only the raw text of HTML document that occurs between the two given phrases. 
+        
+            Gives only the first occurrence
+        
+        Parameters
+        ----------
+        filename: str
+            Input filename string.
+        begin_phrases: list
+            List of string phrases which denote the starting marker of where to start
+            extracting text from in the HTML
+        end_phrases: list
+            List of string phrases which denote the ending marker of where to stop
+            extracting text from in the HTML
+        
+        Returns
+        -------
+            Extracted and formatted text from the input HTML file
+
+    """
+    
+    if filename.endswith('.html'):
+        title = filename.split(".")[0].split("/")[-1]
+
+        # Opening the html file
+        html_file = open(filename, "r")
+        # Reading the file
+        index = html_file.read()
+        # Creating a BeautifulSoup object and specifying the parser
+        s = BeautifulSoup(index, 'lxml')
+
+        for bphrase in begin_phrases:
+            for ephrase in end_phrases: 
+                pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL)
+                matches = re.findall(pattern, s.text)
+                if len(matches) > 0:
+                    the_match = matches[0]
+                    the_match = the_match.replace("\n", " ")
+                    the_match = the_match.replace("­ ", "")
+                    simpler_text = extract_summary(the_match)
+                    return simpler_text
+        
+    return ''
+
+def remove_stop_words(text):
+    """ Removes unwanted tokens from text
+        
+            This is a custom function for this dataset. The main purpose is for 
+            doing more accurate or useful word counts of documents without
+            taking into account stopwords or words that do not contain any 
+            valuable meaning for this particular use case - i.e., identifying
+            substantive regulatory statements or legal obligations in EU legislative text.
+        
+        Parameters
+        ----------
+        text: str
+            Input text string.
+        
+        Returns
+        -------
+            Processed text without custom stopwords and of useful length.
+
+    """
+
+    stopwords = ['such', 'on', 'as','to', 'is', 'in', 'or', 'a', 'be', 'am', 'are', 'the', 'and', 'this', 'that', 'for', 'with', 'are', 'its', 'which', 'have', 'has', 'these', 'those', 'from', 'was', 'were', 'had', 'into', 'then']
+    tokens = text.split()
+    for i in range(0, len(tokens)):
+        tokens[i] = re.sub(r'[^\w\s]', '', tokens[i]) # remove punctuation
+        tokens[i] = tokens[i].replace(' ', '') # remove whitespace
+        
+    # remove stop words and words that are less than 3 characters long
+    relevant_tokens = []
+    for token in tokens:
+        if (token.lower() not in stopwords) and (len(token) > 2):
+            relevant_tokens.append(token)
+    
+    return ' '.join(relevant_tokens)
+            
+def get_doc_lengths(text):
+    """ Calculates two metrics of document length: word count and sentence count
+
+        Parameters
+        ----------
+        
+        text: str
+            Input text string.
+        
+        Returns
+        -------
+            word count: int,
+                Number of substantive words in the given text
+
+            sent_count: int,
+                Number of sentences in the given text
+
+    """
+    
+    sent_count = len(text.split('\n\n\n'))
+    word_count = len(remove_stop_words(text).split())
+    
+    return word_count, sent_count
+
+def get_deontic_type(sent, deontics=DEONTICS):
+    """ Identifies which deontic words appear in a given sentence.
+
+        Parameters
+        ----------
+        
+        sent: str
+            Input sentence
+        deontics: list
+            List of deontic words or phrases
+        
+        Returns
+        -------
+            Pipe-delimited string of deontic phrases in the sentence
+
+    """
+    result = []
+    for deontic in deontics:
+        if deontic in (" ".join(sent.split())):
+            result.append(deontic)
+    if len(result) == 0:
+        return 'None'
+    else:
+        return ' | '.join(result)
+    
+def identify_info(filename, text, deontics=DEONTICS):   
+    """ Extracts metadata and sentences from a document
+
+        Parameters
+        ----------
+        
+        filename: str
+            Filename (not path) of document
+        text: str
+            Text in the document to extract metadata and sentences from
+        
+        Returns
+        -------
+            List of lists where each list is a row in a dataframe or table:
+            [celex, sent, deontic, word_count, sent_count, doc_format]
+            celex: identifier for document
+            sent: a sentence extracted from that document
+            deontic: pipe-delimited string which represents the list of deontic words in the sentence
+            word_count: number of substative words in the document
+            sentence_count: number of sentences in the document
+            doc_format: PDF or HTML?
+
+    """
+    word_count, sentence_count = get_doc_lengths(text)
+    rows = []
+    sents = text.split('\n\n\n')
+    doc_format = 'pdf' if filename.endswith('.pdf') else 'html'
+    
+    # Filter out sentences that include negative flags for regulatory text
+    for sent in sents:
+        exclude = False
+        for item in EXCLUDED_PHRASES:
+            if fuzz.ratio(sent.strip(), item) >= 90:
+                exclude = True
+        
+        if not exclude:
+            current_row = []
+            current_row.append(filename.replace('.pdf','').replace('.html','')) # celex number (identifier) of document
+            current_row.append(sent.strip()) # sentence text
+            deontic_types = get_deontic_type(sent.strip())
+            current_row.append(deontic_types) # deontic types in the sentence
+            current_row.append(word_count) # word count in document
+            current_row.append(sentence_count) # sentence count in document
+            current_row.append(doc_format) # PDF or HTML?
+            if deontic_types != 'None':
+                rows.append(current_row)
+        
+    return rows
+
+# END: function definitions
+# BEGIN: process input and generate prepared data for:
+# 1. Ground truth labelling by legal experts (regulatory (1) or constitutive (0) and attribute label)
+#    -> Also used as training data for few shot text classifier
+# 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
+
+# Initialise output directories
+check_out_dir(OUT_DIR)
+check_out_dir(OBL_DIR)
+
+# generate index and batch sequence of documents
+document_index = generate_batched_index_of_data(PDF_DIR=PDF_DIR, HTML_DIR=HTML_DIR)
+
+idx = 1
+
+print()
+# Process files
+for item in document_index:
+    # initialise result table (rows list)
+    rows = []
+
+    # get list of filenames in this batch
+    list_of_filenames_in_batch = list(set(document_index[item]))
+
+    # number of files in batch
+    num_files = len(list_of_filenames_in_batch)
+
+    start_time = time.time() # time execution
+
+    # process PDFs in batch
+    with os.scandir(PDF_DIR) as iter:
+        for i, filename in enumerate(iter):
+            if ('.pdf' in filename.name) and (filename.name in list_of_filenames_in_batch):
+                new_doc = extract_text_from_pdf(PDF_DIR + "/" + filename.name)
+                rows.extend(identify_info(filename.name, new_doc))
+                
+    # process HTMLs in batch
+    with os.scandir(HTML_DIR) as iter:
+        for i, filename in enumerate(iter):
+            if ('.html' in filename.name) and (filename.name in list_of_filenames_in_batch):
+                new_doc = extract_text_from_html(HTML_DIR + "/" + filename.name)
+                rows.extend(identify_info(filename.name, new_doc))
+
+    # Write processing results of current batch to file
+    df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
+    df.to_csv(os.path.join(OBL_DIR, item + '_' + OBL_FNAME), index=False)
+
+    end_time = time.time() # time execution
+
+    execution_time = end_time - start_time
+    print('Processed Batch (', idx, '/', len(document_index), ') with ', num_files, ' files in ', execution_time, ' seconds.')
+    print()
+    idx += 1
+
+    
+    
