@@ -495,6 +495,9 @@ document_index = generate_batched_index_of_data(PDF_DIR=PDF_DIR, HTML_DIR=HTML_D
 idx = 1
 
 print()
+
+master_df = pd.DataFrame([], columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format']) # initialise master dataframe which will hold merged results of all batches
+
 # Process files
 for item in document_index:
     # initialise result table (rows list)
@@ -524,6 +527,7 @@ for item in document_index:
 
     # Write processing results of current batch to file
     df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
+    master_df = pd.concat([master_df, df], ignore_index=True) # append rows to master results sheet
     df.to_csv(os.path.join(OBL_DIR, item + '_' + OBL_FNAME), index=False)
 
     end_time = time.time() # time execution
@@ -533,5 +537,4 @@ for item in document_index:
     print()
     idx += 1
 
-    
-    
+master_df.to_csv(os.path.join(OBL_DIR, OBL_FNAME), index=False) # write master merged batch results lists to one file
