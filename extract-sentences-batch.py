@@ -19,13 +19,13 @@ import re
 import time
 
 # Input
-PDF_DIR = "pdfs/"
-HTML_DIR = "htmls/"
+PDF_DIR = "data-preprocessing/pdfs/"
+HTML_DIR = "data-preprocessing/htmls/"
 
 # Output
-OUT_DIR = "output-texts/" # Individual txt files
+OUT_DIR = "data-preprocessing/output-texts/" # Individual txt files
 OBL_FNAME = "legal_obl_datasheet.csv" # Sentences extracted from each document in a summary CSV sheet
-OBL_DIR = "output-result/" # Where to save CSV summary sheet
+OBL_DIR = "data-preprocessing/output-result/" # Where to save CSV summary sheet
 
 # Dictionary of phrases which denote the start and end point
 # of relevant text in the documents
@@ -185,25 +185,39 @@ def clean_sentence_pass2(sent):
     """
     global START_TOKENS
 
+    # print()
+    # print()
+    # print('sent: ', sent)
+    # print()
+    # print()
+
     # Remove unncessary tokens at beginning of sentence e.g.
     # "Article 4    Heading of Article... now starts the relevant part of the sentence"
     sent_tokens = sent.split()
-    if sent_tokens[0].strip() in START_TOKENS:
-
-        if sent_tokens[1].strip().isnumeric():
-            if sent_tokens[2].strip()[0].isupper():
-                # find position / index of next upper case token in sent
-                i = get_index_of_next_upper_case_token(sent_tokens)
-                if i > 2:
-                    return ' '.join(sent_tokens[i:])
+    if len(sent_tokens) > 0:
+        if sent_tokens[0].strip() in START_TOKENS:
+            if len(sent_tokens) > 1:
+                if sent_tokens[1].strip().isnumeric():
+                    if len(sent_tokens) > 2:
+                        if sent_tokens[2].strip()[0].isupper():
+                            # find position / index of next upper case token in sent
+                            i = get_index_of_next_upper_case_token(sent_tokens)
+                            if i > 2:
+                                return ' '.join(sent_tokens[i:])
+                            else:
+                                return ' '.join(sent_tokens[3:])
+                        else:
+                            return ' '.join(sent_tokens[2:])
+                    else:
+                        return ' '.join(sent_tokens)
                 else:
-                    return ' '.join(sent_tokens[3:])
+                    return ' '.join(sent_tokens)
             else:
-                return ' '.join(sent_tokens[2:])
+                return ' '.join(sent_tokens)
         else:
             return ' '.join(sent_tokens)
     else:
-        return ' '.join(sent_tokens)
+        return sent.strip()
 
 def clean_sentence_pass1(sent_text):
     """Formats a sentence to be more easily processed downstream for classifying them as regulatory or not.
