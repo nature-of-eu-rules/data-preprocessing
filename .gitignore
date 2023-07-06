@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 output-texts/
 output-result/
+*.pdf
+*.html
 
 # C extensions
 *.so
