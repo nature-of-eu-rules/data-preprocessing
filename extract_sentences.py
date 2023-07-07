@@ -2,7 +2,7 @@
 # coding: utf-8
 
 """
-Script to extract the regulatory section (as well as the sentences and metadata) of
+Script to extract the regulatory section (as well as the sentences) of
 EU legislative documents (PDF / HTML) located on the EURLEX website. 
 Website: http://eur-lex.europa.eu/
 """
@@ -16,15 +16,24 @@ from thefuzz import fuzz
 from thefuzz import process
 import os
 import re
+import argparse
+import sys
+from os.path import exists
 
-# Input
-PDF_DIR = "pdfs/"
-HTML_DIR = "htmls/"
+argParser = argparse.ArgumentParser(description='EU Legislation Regulatory Text and Sentence Extractor')
+required = argParser.add_argument_group('required arguments')
+required.add_argument("-in", "--input", required=True, help="Path to directory containing PDF and / or HTML EU legislative documents as downloaded using code from: https://github.com/nature-of-eu-rules/data-extraction")
+required.add_argument("-out", "--output", required=True, help="Path to a CSV file which should store extracted sentences from the regulatory part of the input EU legislative documents found in the input folder e.g. 'path/to/sentences.csv'. ")
+args = argParser.parse_args()
 
-# Output
-OUT_DIR = "output-texts/" # Individual txt files
-OBL_FNAME = "legal_obl_datasheet.csv" # Sentences extracted from each document in a summary CSV sheet
-OBL_DIR = "output-result/" # Where to save CSV summary sheet
+if args.input is None:
+     sys.exit('No input file specified. Type "python extract_sentences.py -h" for usage help.')
+
+if args.output is None:
+     sys.exit('No output file specified. Type "python extract_sentences.py -h" for usage help.')
+
+INPUT_DIR = str(args.input)
+OUTPUT_FILE = str(args.output)
 
 # Dictionary of phrases which denote the start and end point
 # of relevant text in the documents
@@ -38,27 +47,14 @@ BEGIN_PHRASE_L = "HAS ADOPTED THIS DIRECTIVE"
 BEGIN_PHRASES = [BEGIN_PHRASE_R1, BEGIN_PHRASE_R2, BEGIN_PHRASE_D1, BEGIN_PHRASE_D2, BEGIN_PHRASE_D3, BEGIN_PHRASE_L]
 
 # Other constants
-EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force"]
+EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
+EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,', 'in all other cases,']
 START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
 END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
 DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
 DIGITS = '0123456789'
 
 # BEGIN: function definitions
-
-def check_out_dir(data_dir):
-    """Check if directory for saving extracted text exists, make directory if not 
-
-        Parameters
-        ----------
-        data_dir: str
-            Output directory path.
-
-    """
-
-    if not os.path.isdir(data_dir):
-        os.makedirs(data_dir)
-        print(f"Created saving directory at {data_dir}")
 
 def get_index_of_next_upper_case_token(sent_tokens, start_index = 3):
     """Gets index of first word (after the given start_index) in list of words
@@ -97,6 +93,7 @@ def is_valid_sentence(sent_text):
     """
     global DIGITS
     global EXCLUDED_PHRASES
+    global EXCLUDED_START_PHRASES
 
     is_valid = True
     
@@ -115,7 +112,13 @@ def is_valid_sentence(sent_text):
     # Rule 4: sentence must not include these phrases (these phrases indicate non-regulatory sentences)
     for phrase in EXCLUDED_PHRASES:
         if (phrase in sent_text.lower()) or (phrase in clean_sentence_pass2(sent_text).lower()):
-            return False
+            is_valid = False
+
+    # Rule 5: sentence must not include these phrases AT THE START of the sentence        
+    for start_phrase in EXCLUDED_START_PHRASES:
+        if sent_text.lower().startswith(start_phrase):
+            is_valid = False
+        
     return is_valid
             
 def clean_sentence_pass2(sent):
@@ -433,36 +436,17 @@ def identify_info(filename, text, deontics=DEONTICS):
 #    -> Also used as training data for few shot text classifier
 # 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
 
-# Initialise output directories
-check_out_dir(OUT_DIR)
-check_out_dir(OBL_DIR)
-
 rows = []
 
-# Process PDFs
-with os.scandir(PDF_DIR) as iter:
+# Process documents
+with os.scandir(INPUT_DIR) as iter:
     for i, filename in enumerate(iter):
-        if '.pdf' in filename.name:
-            new_doc = extract_text_from_pdf(PDF_DIR + "/" + filename.name)
-            rows.extend(identify_info(filename.name, new_doc))
-            fname = str(filename.name).replace(".pdf","")
-            print(i, '. ', fname)
-            df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
-            with open(OUT_DIR + "/" + fname + ".txt", "w") as outfile:
-                outfile.write(new_doc)
+        if filename.name.lower().endswith('.pdf'): # PDFs
+            new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
+        elif filename.name.lower().endswith('.html'): # HTMLs
+            new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
+        rows.extend(identify_info(filename.name, new_doc))
 
-# Process HTMLs               
-with os.scandir(HTML_DIR) as iter:
-    for i, filename in enumerate(iter):
-        if '.html' in filename.name:
-            new_doc = extract_text_from_html(HTML_DIR + "/" + filename.name)
-            rows.extend(identify_info(filename.name, new_doc))
-            fname = str(filename.name).replace(".html","")
-            print(i, '. ', fname)
-            df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
-            with open(OUT_DIR + "/" + fname + ".txt", "w") as outfile:
-                outfile.write(new_doc)
-    
 # Write dataframe to file
 df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
-df.to_csv(os.path.join(OBL_DIR, OBL_FNAME), index=False)
+df.to_csv(OUTPUT_FILE, index=False)

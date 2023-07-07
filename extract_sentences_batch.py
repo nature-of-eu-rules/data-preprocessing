@@ -2,9 +2,13 @@
 # coding: utf-8
 
 """
-Script to extract the regulatory section (as well as the sentences and metadata) of
+Script to extract the regulatory section (as well as the sentences) of
 EU legislative documents (PDF / HTML) located on the EURLEX website. 
 Website: http://eur-lex.europa.eu/
+This is a version of https://github.com/nature-of-eu-rules/data-preprocessing/blob/main/extract-sentences.py
+which is modified to run the extraction by batches (one for each year of legislation). This is to
+preserve results upon premature termination or failure of the script and to avoid having
+to re-extract the same information because it was not saved to disk.
 """
 
 import fitz
@@ -17,15 +21,24 @@ from thefuzz import process
 import os
 import re
 import time
+import argparse
+import sys
+from os.path import exists
 
-# Input
-PDF_DIR = "data-preprocessing/pdfs/"
-HTML_DIR = "data-preprocessing/htmls/"
+argParser = argparse.ArgumentParser(description='EU Legislation Regulatory Text and Sentence Extractor (batch)')
+required = argParser.add_argument_group('required arguments')
+required.add_argument("-in", "--input", required=True, help="Path to directory containing PDF and / or HTML EU legislative documents as downloaded using code from: https://github.com/nature-of-eu-rules/data-extraction")
+required.add_argument("-out", "--output", required=True, help="Path to a CSV file which should store extracted sentences from the regulatory part of the input EU legislative documents found in the input folder e.g. 'path/to/sentences.csv'. ")
+args = argParser.parse_args()
 
-# Output
-OUT_DIR = "data-preprocessing/output-texts/" # Individual txt files
-OBL_FNAME = "legal_obl_datasheet.csv" # Sentences extracted from each document in a summary CSV sheet
-OBL_DIR = "data-preprocessing/output-result/" # Where to save CSV summary sheet
+if args.input is None:
+     sys.exit('No input file specified. Type "python extract_sentences_batch.py -h" for usage help.')
+
+if args.output is None:
+     sys.exit('No output file specified. Type "python extract_sentences_batch.py -h" for usage help.')
+
+INPUT_DIR = str(args.input)
+OUTPUT_FILE = str(args.output)
 
 # Dictionary of phrases which denote the start and end point
 # of relevant text in the documents
@@ -39,8 +52,8 @@ BEGIN_PHRASE_L = "HAS ADOPTED THIS DIRECTIVE"
 BEGIN_PHRASES = [BEGIN_PHRASE_R1, BEGIN_PHRASE_R2, BEGIN_PHRASE_D1, BEGIN_PHRASE_D2, BEGIN_PHRASE_D3, BEGIN_PHRASE_L]
 
 # Other constants
-EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning"]
-EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,']
+EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
+EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,', 'in all other cases,']
 START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
 END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
 DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
@@ -62,48 +75,6 @@ def generate_batched_index_for_directory(DIR):
                     result[year].append(filename.name)  # append filename to index
 
     return result
-
-def generate_batched_index_of_data(PDF_DIR, HTML_DIR):
-    """ Generates an index of the documents to process based on year 
-
-            Generates 1 batch per document year.
-
-        Parameters
-        ----------
-
-        PDF_DIR : str,
-            path to pdf documents to process
-        HTML_DIR : str,
-            path to HTML documents to process
-
-        Returns
-        -------
-
-            a Python dict of the form {'year' : [list of filenames], ... , 'another_year' : [another list of filenames]}
-            where 'year' represents a year e.g. '2022' and '[list of filenames]' represents a list of PDF or HTML 
-            filenames to process (just filenames and not relative or absolute paths to files)
-
-    """
-
-    index_PDFs = generate_batched_index_for_directory(PDF_DIR)
-    index_HTMLs = generate_batched_index_for_directory(HTML_DIR)
-    merged_index = { key:index_PDFs.get(key,[])+index_HTMLs.get(key,[]) for key in set(list(index_PDFs.keys())+list(index_HTMLs.keys())) } # merge PDF and HTML file indexes
-    return merged_index
-
-
-def check_out_dir(data_dir):
-    """Check if directory for saving extracted text exists, make directory if not 
-
-        Parameters
-        ----------
-        data_dir: str
-            Output directory path.
-
-    """
-
-    if not os.path.isdir(data_dir):
-        os.makedirs(data_dir)
-        print(f"Created saving directory at {data_dir}")
 
 def get_index_of_next_upper_case_token(sent_tokens, start_index = 3):
     """Gets index of first word (after the given start_index) in list of words
@@ -184,12 +155,6 @@ def clean_sentence_pass2(sent):
 
     """
     global START_TOKENS
-
-    # print()
-    # print()
-    # print('sent: ', sent)
-    # print()
-    # print()
 
     # Remove unncessary tokens at beginning of sentence e.g.
     # "Article 4    Heading of Article... now starts the relevant part of the sentence"
@@ -499,17 +464,11 @@ def identify_info(filename, text, deontics=DEONTICS):
 #    -> Also used as training data for few shot text classifier
 # 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
 
-# Initialise output directories
-check_out_dir(OUT_DIR)
-check_out_dir(OBL_DIR)
-
 # generate index and batch sequence of documents
-document_index = generate_batched_index_of_data(PDF_DIR=PDF_DIR, HTML_DIR=HTML_DIR)
+document_index = generate_batched_index_for_directory(INPUT_DIR)
 
 idx = 1
-
 print()
-
 master_df = pd.DataFrame([], columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format']) # initialise master dataframe which will hold merged results of all batches
 
 # Process files
@@ -519,36 +478,32 @@ for item in document_index:
 
     # get list of filenames in this batch
     list_of_filenames_in_batch = list(set(document_index[item]))
-
     # number of files in batch
     num_files = len(list_of_filenames_in_batch)
-
     start_time = time.time() # time execution
 
     # process PDFs in batch
-    with os.scandir(PDF_DIR) as iter:
+    with os.scandir(INPUT_DIR) as iter:
         for i, filename in enumerate(iter):
             if ('.pdf' in filename.name) and (filename.name in list_of_filenames_in_batch):
-                new_doc = extract_text_from_pdf(PDF_DIR + "/" + filename.name)
+                new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
+                rows.extend(identify_info(filename.name, new_doc))
+            elif ('.html' in filename.name) and (filename.name in list_of_filenames_in_batch):
+                new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
                 rows.extend(identify_info(filename.name, new_doc))
                 
-    # process HTMLs in batch
-    with os.scandir(HTML_DIR) as iter:
-        for i, filename in enumerate(iter):
-            if ('.html' in filename.name) and (filename.name in list_of_filenames_in_batch):
-                new_doc = extract_text_from_html(HTML_DIR + "/" + filename.name)
-                rows.extend(identify_info(filename.name, new_doc))
-
     # Write processing results of current batch to file
     df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
     master_df = pd.concat([master_df, df], ignore_index=True) # append rows to master results sheet
-    df.to_csv(os.path.join(OBL_DIR, item + '_' + OBL_FNAME), index=False)
+    path_to_batch_file = os.path.join(os.path.dirname(OUTPUT_FILE), str(item) + '_' + os.path.basename(OUTPUT_FILE))
+    df.to_csv(path_to_batch_file, index=False)
 
     end_time = time.time() # time execution
-
     execution_time = end_time - start_time
+
     print('Processed Batch (', idx, '/', len(document_index), ') with ', num_files, ' files in ', execution_time, ' seconds.')
     print()
+
     idx += 1
 
-master_df.to_csv(os.path.join(OBL_DIR, OBL_FNAME), index=False) # write master merged batch results lists to one file
+master_df.to_csv(OUTPUT_FILE, index=False) # write master merged batch results lists to one file
