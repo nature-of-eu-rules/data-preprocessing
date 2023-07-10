@@ -31,11 +31,45 @@ required.add_argument("-in", "--input", required=True, help="Path to directory c
 required.add_argument("-out", "--output", required=True, help="Path to a CSV file which should store extracted sentences from the regulatory part of the input EU legislative documents found in the input folder e.g. 'path/to/sentences.csv'. ")
 args = argParser.parse_args()
 
-if args.input is None:
-     sys.exit('No input file specified. Type "python extract_sentences_batch.py -h" for usage help.')
+def is_valid_output_dir_or_file(arg):
+    if arg is None:
+        return False, "No valid CSV output file specified. Type 'python extract_sentences_batch.py -h' for usage help."
+    else:
+        if os.path.isdir(str(arg)):
+            return True, ''
+        else:
+            if os.path.isdir(os.path.dirname(str(arg))):
+                if str(os.path.basename(str(arg))).lower().endswith('.csv'):
+                    return True, ''
+                else:
+                    return False, 'Not a valid output file extension. CSV expected. Type "python extract_sentences_batch.py -h" for usage help.'
+            else:
+                return False, 'The specified directory for your output CSV file is not valid or does not exist. First create it. Type "python extract_sentences_batch.py -h" for usage help.'
 
-if args.output is None:
-     sys.exit('No output file specified. Type "python extract_sentences_batch.py -h" for usage help.')
+def is_valid_input_dir(arg):
+    if arg is None:
+        return False, "No valid input directory specified. Type 'python extract_sentences_batch.py -h' for usage help."
+    else:
+        count = 0
+        if os.path.isdir(str(arg)):
+            for path in os.listdir(str(arg)):
+                if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4] in ['.html', '.pdf']:
+                    count += 1
+            if count > 0:
+                return True, ''
+            else:
+                return False, 'No valid .pdf or .html files found in input directory.'
+        else:
+            return False, 'The specified input directory is not valid or does not exist. First create it. Type "python extract_sentences_batch.py -h" for usage help.'
+
+is_valid_input_directory, inerrmsg = is_valid_input_dir(args.input)
+is_valid_output_directory_or_file, errmsg = is_valid_output_dir_or_file(args.output)
+
+if not is_valid_output_directory_or_file:
+     sys.exit(errmsg)
+
+if not is_valid_input_directory:
+     sys.exit(inerrmsg)
 
 INPUT_DIR = str(args.input)
 OUTPUT_FILE = str(args.output)
