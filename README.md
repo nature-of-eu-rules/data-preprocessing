@@ -1,6 +1,6 @@
 # data-preprocessing
 
-Data pre-processing scripts for the [Nature of EU Rules project](https://research-software-directory.org/projects/the-nature-of-eu-rules-strict-and-detailed-or-lacking-bite).
+Data pre-processing scripts for the [Nature of EU Rules project](https://research-software-directory.org/projects/the-nature-of-eu-rules-strict-and-detailed-or-lacking-bite). There are two scripts in this repo for extracting sentences from EU legislative documents, one includes batch processing by year to preserve results in case of premature termination or failure of the script. The scripts are described below:
 
 #### Sentence Extractor
 
