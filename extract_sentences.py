@@ -481,11 +481,12 @@ rows = []
 # Process documents
 with os.scandir(INPUT_DIR) as iter:
     for i, filename in enumerate(iter):
-        if filename.name.lower().endswith('.pdf'): # PDFs
-            new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
-        elif filename.name.lower().endswith('.html'): # HTMLs
-            new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
-        rows.extend(identify_info(filename.name, new_doc))
+        if filename.name.lower().endswith('.pdf') or filename.name.lower().endswith('.html'):
+            if filename.name.lower().endswith('.pdf'): # PDFs
+                new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
+            elif filename.name.lower().endswith('.html'): # HTMLs
+                new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
+            rows.extend(identify_info(filename.name, new_doc))
 
 # Write dataframe to file
 df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
