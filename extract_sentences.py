@@ -38,7 +38,7 @@ def is_valid_output_dir_or_file(arg):
                     return True, ''
                 else:
                     return False, 'Not a valid output file extension. CSV expected. Type "python extract_sentences.py -h" for usage help.'
-            elif os.path.isfile(str(arg)) and str(arg).lower().endswith('.csv'):
+            elif str(arg).lower().endswith('.csv'):
                 return True, ''
             else:
                 return False, 'The specified directory for your output CSV file is not valid or does not exist. First create it. Type "python extract_sentences.py -h" for usage help.'
