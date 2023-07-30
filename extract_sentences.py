@@ -50,9 +50,11 @@ def is_valid_input_dir(arg):
             print(str(arg), 'is a valid directory')
             for path in os.listdir(str(arg)):
                 print('current path:', str(path))
+                print('current filepath:', str(os.path.join(str(arg), path)))
+                print('current file-ext:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4])
                 if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4] in ['.html', '.pdf']:
-                    print('current filepath:', str(os.path.join(str(arg), path)))
-                    print('current file-ext:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4])
+                    print('current filepath2:', str(os.path.join(str(arg), path)))
+                    print('current file-ext2:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4])
                     count += 1
             if count > 0:
                 return True, ''
