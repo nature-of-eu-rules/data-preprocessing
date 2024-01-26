@@ -210,6 +210,15 @@ def clean_sentence_pass2(sent):
     if sent_tokens[0].strip() in START_TOKENS:
 
         if sent_tokens[1].strip().isnumeric():
+            if len(sent_tokens) < 3:
+                print('heres your problem1...')
+                print('sentence: ', sent)
+                print('tokens: ', sent_tokens)
+            else:
+                print('lets check if its problem2...')
+                print('sentence: ', sent)
+                print('is string empty?: ', len(sent_tokens[2].strip()) == 0)
+
             if sent_tokens[2].strip()[0].isupper():
                 # find position / index of next upper case token in sent
                 i = get_index_of_next_upper_case_token(sent_tokens)
