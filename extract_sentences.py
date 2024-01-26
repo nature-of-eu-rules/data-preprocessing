@@ -54,7 +54,7 @@ def is_valid_input_dir(arg):
                 print('current path:', str(path))
                 print('current filepath:', str(os.path.join(str(arg), path)))
                 print('current file-ext:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:])
-                if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:] in ['.html', '.pdf']:
+                if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:] in ['html', 'pdf']:
                     print('current filepath2:', str(os.path.join(str(arg), path)))
                     print('current file-ext2:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:])
                     count += 1
@@ -82,11 +82,37 @@ OUTPUT_FILE = str(args.output)
 
 BEGIN_PHRASE_R1 = "HAS ADOPTED THIS REGULATION"
 BEGIN_PHRASE_R2 = "HAVE ADOPTED THIS REGULATION"
+BEGIN_PHRASE_R3 = "HAVE ADOPTED THE FOLLOWING REGULATION"
+BEGIN_PHRASE_R4 = "HAS ADOPTED THE FOLLOWING REGULATION"
+
 BEGIN_PHRASE_D1 = "HAS DECIDED AS FOLLOWS"
 BEGIN_PHRASE_D2 = "HAVE ADOPTED THIS DECISION"
 BEGIN_PHRASE_D3 = "HAS ADOPTED THIS DECISION"
-BEGIN_PHRASE_L = "HAS ADOPTED THIS DIRECTIVE"
-BEGIN_PHRASES = [BEGIN_PHRASE_R1, BEGIN_PHRASE_R2, BEGIN_PHRASE_D1, BEGIN_PHRASE_D2, BEGIN_PHRASE_D3, BEGIN_PHRASE_L]
+BEGIN_PHRASE_D4 = "HAVE DECIDED AS FOLLOWS"
+BEGIN_PHRASE_D5 = "HAVE ADOPTED THE FOLLOWING DECISION"
+BEGIN_PHRASE_D6 = "HAS ADOPTED THE FOLLOWING DECISION"
+
+BEGIN_PHRASE_L1 = "HAS ADOPTED THIS DIRECTIVE"
+BEGIN_PHRASE_L2 = "HAVE ADOPTED THIS DIRECTIVE"
+BEGIN_PHRASE_L3 = "HAVE ADOPTED THE FOLLOWING DIRECTIVE"
+BEGIN_PHRASE_L4 = "HAS ADOPTED THE FOLLOWING DIRECTIVE"
+
+BEGIN_PHRASES = [
+    BEGIN_PHRASE_R1,
+    BEGIN_PHRASE_R2,
+    BEGIN_PHRASE_R3,
+    BEGIN_PHRASE_R4,
+    BEGIN_PHRASE_D1,
+    BEGIN_PHRASE_D2,
+    BEGIN_PHRASE_D3,
+    BEGIN_PHRASE_D4,
+    BEGIN_PHRASE_D5,
+    BEGIN_PHRASE_D6,
+    BEGIN_PHRASE_L1,
+    BEGIN_PHRASE_L2,
+    BEGIN_PHRASE_L3,
+    BEGIN_PHRASE_L4
+]
 
 # Other constants
 EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
@@ -284,7 +310,7 @@ def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END
 
     for bphrase in begin_phrases:
         for ephrase in end_phrases: 
-            pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL)
+            pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL | re.IGNORECASE)
             matches = re.findall(pattern, text)
             if len(matches) > 0:
                 the_match = matches[0]
@@ -329,7 +355,7 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
 
         for bphrase in begin_phrases:
             for ephrase in end_phrases: 
-                pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL)
+                pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL | re.IGNORECASE)
                 matches = re.findall(pattern, s.text)
                 if len(matches) > 0:
                     the_match = matches[0]
