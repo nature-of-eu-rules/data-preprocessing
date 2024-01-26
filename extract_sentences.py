@@ -212,9 +212,10 @@ def clean_sentence_pass2(sent):
 
         if sent_tokens[1].strip().isnumeric():
             if len(sent_tokens) < 3:
-                print('heres your problem1...')
-                print('sentence: ', sent)
-                print('tokens: ', sent_tokens)
+                # print('heres your problem1...')
+                # print('sentence: ', sent)
+                # print('tokens: ', sent_tokens)
+                return ' '.join(sent_tokens)
             else:
                 print('lets check if its problem2...')
                 print('sentence: ', sent)
