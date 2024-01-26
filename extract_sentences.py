@@ -179,7 +179,8 @@ def is_valid_sentence(sent_text):
 
     # Rule 4: sentence must not include these phrases (these phrases indicate non-regulatory sentences)
     for phrase in EXCLUDED_PHRASES:
-        if (phrase in sent_text.lower()) or (phrase in clean_sentence_pass2(sent_text).lower()):
+        cs = clean_sentence_pass2(sent_text).lower()
+        if (phrase in sent_text.lower()) or (phrase in cs) or (len(cs.split()) < 3):
             is_valid = False
 
     # Rule 5: sentence must not include these phrases AT THE START of the sentence        
