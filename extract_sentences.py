@@ -328,8 +328,11 @@ def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END
                 the_match = the_match.replace("\n", " ")
                 the_match = the_match.replace("­ ", "")
                 simpler_text = extract_summary(the_match)
+                if len(simpler_text) < 15:
+                    print('notext1: ', filename)
                 return simpler_text
-        
+    
+    print('notext2: ', filename)
     return ''
 
 def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
@@ -374,7 +377,7 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
                     the_match = the_match.replace("­ ", "")
                     simpler_text = extract_summary(the_match)
                     return simpler_text
-        
+    
     return ''
 
 def remove_stop_words(text):
