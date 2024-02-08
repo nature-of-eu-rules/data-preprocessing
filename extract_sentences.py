@@ -49,14 +49,8 @@ def is_valid_input_dir(arg):
     else:
         count = 0
         if os.path.isdir(str(arg)):
-            # print(str(arg), 'is a valid directory')
             for path in os.listdir(str(arg)):
-                # print('current path:', str(path))
-                # print('current filepath:', str(os.path.join(str(arg), path)))
-                # print('current file-ext:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:])
                 if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:] in ['html', 'pdf']:
-                    # print('current filepath2:', str(os.path.join(str(arg), path)))
-                    # print('current file-ext2:', str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:])
                     count += 1
             if count > 0:
                 return True, ''
@@ -121,6 +115,11 @@ START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION'
 END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
 DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
 DIGITS = '0123456789'
+
+notexts1_html = []
+notexts2_html = []
+notexts1_pdf = []
+notexts2_pdf = []
 
 # BEGIN: function definitions
 
@@ -216,10 +215,10 @@ def clean_sentence_pass2(sent):
                 # print('sentence: ', sent)
                 # print('tokens: ', sent_tokens)
                 return ' '.join(sent_tokens)
-            else:
-                print('lets check if its problem2...')
-                print('sentence: ', sent)
-                print('is string empty?: ', len(sent_tokens[2].strip()) == 0)
+            # else:
+                # print('lets check if its problem2...')
+                # print('sentence: ', sent)
+                # print('is string empty?: ', len(sent_tokens[2].strip()) == 0)
 
             if sent_tokens[2].strip()[0].isupper():
                 # find position / index of next upper case token in sent
@@ -289,6 +288,7 @@ def extract_summary(text):
     return '\n\n\n'.join(new_sent_list)
 
 def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
+    global notexts1_pdf, notexts2_pdf
     """ Extracts only the raw text of PDF document that occurs between the two given phrases. 
         
             Gives only the first occurrence
@@ -319,23 +319,24 @@ def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END
                 current_page_text = page.get_text(sort=True)
                 text += current_page_text
 
-    for bphrase in begin_phrases:
-        for ephrase in end_phrases: 
-            pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL | re.IGNORECASE)
-            matches = re.findall(pattern, text)
-            if len(matches) > 0:
-                the_match = matches[0]
-                the_match = the_match.replace("\n", " ")
-                the_match = the_match.replace("­ ", "")
-                simpler_text = extract_summary(the_match)
-                if len(simpler_text) < 15:
-                    print('notext1: ', filename)
-                return simpler_text
-    
-    print('notext2: ', filename)
+        for bphrase in begin_phrases:
+            for ephrase in end_phrases: 
+                pattern = re.compile(f"(?<={bphrase})(.*?)(?={ephrase})", re.DOTALL | re.IGNORECASE)
+                matches = re.findall(pattern, text)
+                if len(matches) > 0:
+                    the_match = matches[0]
+                    the_match = the_match.replace("\n", " ")
+                    the_match = the_match.replace("­ ", "")
+                    simpler_text = extract_summary(the_match)
+                    if len(simpler_text) < 15:
+                        notexts1_pdf.append(title)
+                    return simpler_text
+            
+    notexts2_pdf.append(title)
     return ''
 
 def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
+    global notexts1_html, notexts2_html
     """ Extracts only the raw text of HTML document that occurs between the two given phrases. 
         
             Gives only the first occurrence
@@ -376,8 +377,11 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
                     the_match = the_match.replace("\n", " ")
                     the_match = the_match.replace("­ ", "")
                     simpler_text = extract_summary(the_match)
+                    if len(simpler_text) < 15:
+                        notexts1_html.append(title)
                     return simpler_text
-    
+                
+    notexts2_html.append(title)
     return ''
 
 def remove_stop_words(text):
@@ -529,6 +533,16 @@ with os.scandir(INPUT_DIR) as iter:
             elif filename.name.lower().endswith('.html'): # HTMLs
                 new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
             rows.extend(identify_info(filename.name, new_doc))
+
+
+notexts1_df_html = pd.DataFrame(notexts1_html, columns=['celex'])
+notexts1_df_html.to_csv('notexts1_html.csv', index=False)
+notexts2_df_html = pd.DataFrame(notexts2_html, columns=['celex'])
+notexts2_df_html.to_csv('notexts2_html.csv', index=False)
+notexts1_df_pdf = pd.DataFrame(notexts1_pdf, columns=['celex'])
+notexts1_df_pdf.to_csv('notexts1_pdf.csv', index=False)
+notexts2_df_pdf = pd.DataFrame(notexts2_pdf, columns=['celex'])
+notexts2_df_pdf.to_csv('notexts2_pdf.csv', index=False)
 
 # Write dataframe to file
 df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
