@@ -7,6 +7,9 @@ output-texts/
 output-result/
 *.pdf
 *.html
+*.csv
+test_end_phrase.py
+*.sav
 
 # C extensions
 *.so

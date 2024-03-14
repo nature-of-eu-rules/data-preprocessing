@@ -73,7 +73,6 @@ OUTPUT_FILE = str(args.output)
 
 # Dictionary of phrases which denote the start and end point
 # of relevant text in the documents
-
 BEGIN_PHRASE_R1 = "HAS ADOPTED THIS REGULATION"
 BEGIN_PHRASE_R2 = "HAVE ADOPTED THIS REGULATION"
 BEGIN_PHRASE_R3 = "HAVE ADOPTED THE FOLLOWING REGULATION"
@@ -85,6 +84,7 @@ BEGIN_PHRASE_D3 = "HAS ADOPTED THIS DECISION"
 BEGIN_PHRASE_D4 = "HAVE DECIDED AS FOLLOWS"
 BEGIN_PHRASE_D5 = "HAVE ADOPTED THE FOLLOWING DECISION"
 BEGIN_PHRASE_D6 = "HAS ADOPTED THE FOLLOWING DECISION"
+BEGIN_PHRASE_D1 = "DECIDED AS FOLLOWS"
 
 BEGIN_PHRASE_L1 = "HAS ADOPTED THIS DIRECTIVE"
 BEGIN_PHRASE_L2 = "HAVE ADOPTED THIS DIRECTIVE"
@@ -112,7 +112,8 @@ BEGIN_PHRASES = [
 EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
 EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,', 'in all other cases,']
 START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
-END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
+# END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
+END_PHRASES = ["Done at", "DONE AT"]
 DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
 DIGITS = '0123456789'
 
@@ -120,6 +121,8 @@ notexts1_html = []
 notexts2_html = []
 notexts1_pdf = []
 notexts2_pdf = []
+culprits = []
+trouble_sents = []
 
 # BEGIN: function definitions
 
@@ -211,14 +214,7 @@ def clean_sentence_pass2(sent):
 
         if sent_tokens[1].strip().isnumeric():
             if len(sent_tokens) < 3:
-                # print('heres your problem1...')
-                # print('sentence: ', sent)
-                # print('tokens: ', sent_tokens)
                 return ' '.join(sent_tokens)
-            # else:
-                # print('lets check if its problem2...')
-                # print('sentence: ', sent)
-                # print('is string empty?: ', len(sent_tokens[2].strip()) == 0)
 
             if sent_tokens[2].strip()[0].isupper():
                 # find position / index of next upper case token in sent
@@ -460,14 +456,16 @@ def get_deontic_type(sent, deontics=DEONTICS):
     """
     result = []
     for deontic in deontics:
-        if deontic in (" ".join(sent.split())):
+        if deontic in " ".join(sent.split()):
             result.append(deontic)
     if len(result) == 0:
         return 'None'
     else:
         return ' | '.join(result)
     
-def identify_info(filename, text, deontics=DEONTICS):   
+def identify_info(filename, text, deontics=DEONTICS):
+    global culprits
+    global trouble_sents
     """ Extracts metadata and sentences from a document
 
         Parameters
@@ -494,12 +492,16 @@ def identify_info(filename, text, deontics=DEONTICS):
     rows = []
     sents = text.split('\n\n\n')
     doc_format = 'pdf' if filename.endswith('.pdf') else 'html'
-    
+    d = '.'+doc_format
     # Filter out sentences that include negative flags for regulatory text
     for sent in sents:
         exclude = False
         for item in EXCLUDED_PHRASES:
             if fuzz.ratio(sent.strip(), item) >= 90:
+                trouble_sents.append([filename.replace(d,''), sent])
+                # print(filename, ' - ', sent)
+                # print()
+                # print()
                 exclude = True
         
         if not exclude:
@@ -513,6 +515,10 @@ def identify_info(filename, text, deontics=DEONTICS):
             current_row.append(doc_format) # PDF or HTML?
             if deontic_types != 'None':
                 rows.append(current_row)
+
+    if len(rows) == 0:
+        d = '.'+doc_format
+        culprits.append(filename.replace(d, ''))
         
     return rows
 
@@ -523,26 +529,41 @@ def identify_info(filename, text, deontics=DEONTICS):
 # 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
 
 rows = []
-
+# count_pdf = 0
+# count_html = 0
+# wtf_count = 0
 # Process documents
 with os.scandir(INPUT_DIR) as iter:
     for i, filename in enumerate(iter):
         if filename.name.lower().endswith('.pdf') or filename.name.lower().endswith('.html'):
             if filename.name.lower().endswith('.pdf'): # PDFs
+                # count_pdf += 1
                 new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
             elif filename.name.lower().endswith('.html'): # HTMLs
+                # count_html += 1
                 new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
+            # else:
+            #     wtf_count += 1
             rows.extend(identify_info(filename.name, new_doc))
 
+culprit_df = pd.DataFrame(culprits, columns=['celex'])
+culprit_df.to_csv('culprits.csv', index=False)
+tsent_df = pd.DataFrame(trouble_sents, columns=['celex', 'sent'])
+tsent_df.to_csv('tsents.csv', index=False)
 
-notexts1_df_html = pd.DataFrame(notexts1_html, columns=['celex'])
-notexts1_df_html.to_csv('notexts1_html.csv', index=False)
-notexts2_df_html = pd.DataFrame(notexts2_html, columns=['celex'])
-notexts2_df_html.to_csv('notexts2_html.csv', index=False)
-notexts1_df_pdf = pd.DataFrame(notexts1_pdf, columns=['celex'])
-notexts1_df_pdf.to_csv('notexts1_pdf.csv', index=False)
-notexts2_df_pdf = pd.DataFrame(notexts2_pdf, columns=['celex'])
-notexts2_df_pdf.to_csv('notexts2_pdf.csv', index=False)
+# print('pdfs: ', count_pdf)
+# print('htmls: ', count_html)
+# print('wtfs: ', wtf_count)
+# print('total: ', (count_pdf + count_html))
+
+# notexts1_df_html = pd.DataFrame(notexts1_html, columns=['celex'])
+# notexts1_df_html.to_csv('notexts1_html.csv', index=False)
+# notexts2_df_html = pd.DataFrame(notexts2_html, columns=['celex'])
+# notexts2_df_html.to_csv('notexts2_html.csv', index=False)
+# notexts1_df_pdf = pd.DataFrame(notexts1_pdf, columns=['celex'])
+# notexts1_df_pdf.to_csv('notexts1_pdf.csv', index=False)
+# notexts2_df_pdf = pd.DataFrame(notexts2_pdf, columns=['celex'])
+# notexts2_df_pdf.to_csv('notexts2_pdf.csv', index=False)
 
 # Write dataframe to file
 df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
