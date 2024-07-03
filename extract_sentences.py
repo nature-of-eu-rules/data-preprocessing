@@ -10,7 +10,9 @@ Website: http://eur-lex.europa.eu/
 import fitz
 from bs4 import BeautifulSoup
 import pandas as pd
-from lexnlp.nlp.en.segments.sentences import get_sentence_list
+import nltk
+nltk.download('punkt')
+from nltk.tokenize import sent_tokenize
 import string 
 from thefuzz import fuzz
 from thefuzz import process
@@ -273,7 +275,7 @@ def extract_summary(text):
             Formatted text.
 
     """
-    sent_list = get_sentence_list(text)
+    sent_list = sent_tokenize(text)
     
     new_sent_list = []
     for sent in sent_list:
@@ -362,7 +364,7 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
         # Reading the file
         index = html_file.read()
         # Creating a BeautifulSoup object and specifying the parser
-        s = BeautifulSoup(index, 'lxml')
+        s = BeautifulSoup(index, 'lxml-xml')
 
         for bphrase in begin_phrases:
             for ephrase in end_phrases: 
@@ -499,9 +501,6 @@ def identify_info(filename, text, deontics=DEONTICS):
         for item in EXCLUDED_PHRASES:
             if fuzz.ratio(sent.strip(), item) >= 90:
                 trouble_sents.append([filename.replace(d,''), sent])
-                # print(filename, ' - ', sent)
-                # print()
-                # print()
                 exclude = True
         
         if not exclude:
@@ -529,41 +528,15 @@ def identify_info(filename, text, deontics=DEONTICS):
 # 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
 
 rows = []
-# count_pdf = 0
-# count_html = 0
-# wtf_count = 0
 # Process documents
 with os.scandir(INPUT_DIR) as iter:
     for i, filename in enumerate(iter):
         if filename.name.lower().endswith('.pdf') or filename.name.lower().endswith('.html'):
             if filename.name.lower().endswith('.pdf'): # PDFs
-                # count_pdf += 1
                 new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
             elif filename.name.lower().endswith('.html'): # HTMLs
-                # count_html += 1
                 new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
-            # else:
-            #     wtf_count += 1
             rows.extend(identify_info(filename.name, new_doc))
-
-culprit_df = pd.DataFrame(culprits, columns=['celex'])
-culprit_df.to_csv('culprits.csv', index=False)
-tsent_df = pd.DataFrame(trouble_sents, columns=['celex', 'sent'])
-tsent_df.to_csv('tsents.csv', index=False)
-
-# print('pdfs: ', count_pdf)
-# print('htmls: ', count_html)
-# print('wtfs: ', wtf_count)
-# print('total: ', (count_pdf + count_html))
-
-# notexts1_df_html = pd.DataFrame(notexts1_html, columns=['celex'])
-# notexts1_df_html.to_csv('notexts1_html.csv', index=False)
-# notexts2_df_html = pd.DataFrame(notexts2_html, columns=['celex'])
-# notexts2_df_html.to_csv('notexts2_html.csv', index=False)
-# notexts1_df_pdf = pd.DataFrame(notexts1_pdf, columns=['celex'])
-# notexts1_df_pdf.to_csv('notexts1_pdf.csv', index=False)
-# notexts2_df_pdf = pd.DataFrame(notexts2_pdf, columns=['celex'])
-# notexts2_df_pdf.to_csv('notexts2_pdf.csv', index=False)
 
 # Write dataframe to file
 df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])

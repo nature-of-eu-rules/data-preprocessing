@@ -14,7 +14,9 @@ to re-extract the same information because it was not saved to disk.
 import fitz
 from bs4 import BeautifulSoup
 import pandas as pd
-from lexnlp.nlp.en.segments.sentences import get_sentence_list
+import nltk
+nltk.download('punkt')
+from nltk.tokenize import sent_tokenize
 import string 
 from thefuzz import fuzz
 from thefuzz import process
@@ -287,7 +289,7 @@ def extract_summary(text):
             Formatted text.
 
     """
-    sent_list = get_sentence_list(text)
+    sent_list = sent_tokenize(text)
     
     new_sent_list = []
     for sent in sent_list:
@@ -371,7 +373,7 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
         # Reading the file
         index = html_file.read()
         # Creating a BeautifulSoup object and specifying the parser
-        s = BeautifulSoup(index, 'lxml')
+        s = BeautifulSoup(index, 'lxml-xml')
 
         for bphrase in begin_phrases:
             for ephrase in end_phrases: 
