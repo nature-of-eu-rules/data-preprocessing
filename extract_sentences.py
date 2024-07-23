@@ -170,8 +170,9 @@ def is_valid_sentence(sent_text):
     is_valid = True
     
     # Rule 1: sentence should not start with any punctuation character (or numerical digit)
-    if sent_text[0] in (string.punctuation + DIGITS):
-        is_valid = False
+    if len(sent_text) > 0:
+        if sent_text[0] in (string.punctuation + DIGITS):
+            is_valid = False
         
     # Rule 2: check if 'EN Official Journal' or 'PAGE' occurs at start of sentence (this indicates an invalid sentence)
     if sent_text.lower().strip().startswith('en official journal') or sent_text.strip().startswith('PAGE'):
@@ -212,21 +213,24 @@ def clean_sentence_pass2(sent):
     # Remove unncessary tokens at beginning of sentence e.g.
     # "Article 4    Heading of Article... now starts the relevant part of the sentence"
     sent_tokens = sent.split()
-    if sent_tokens[0].strip() in START_TOKENS:
+    if len(sent_tokens) > 0:
+        if sent_tokens[0].strip() in START_TOKENS:
 
-        if sent_tokens[1].strip().isnumeric():
-            if len(sent_tokens) < 3:
-                return ' '.join(sent_tokens)
+            if sent_tokens[1].strip().isnumeric():
+                if len(sent_tokens) < 3:
+                    return ' '.join(sent_tokens)
 
-            if sent_tokens[2].strip()[0].isupper():
-                # find position / index of next upper case token in sent
-                i = get_index_of_next_upper_case_token(sent_tokens)
-                if i > 2:
-                    return ' '.join(sent_tokens[i:])
+                if sent_tokens[2].strip()[0].isupper():
+                    # find position / index of next upper case token in sent
+                    i = get_index_of_next_upper_case_token(sent_tokens)
+                    if i > 2:
+                        return ' '.join(sent_tokens[i:])
+                    else:
+                        return ' '.join(sent_tokens[3:])
                 else:
-                    return ' '.join(sent_tokens[3:])
+                    return ' '.join(sent_tokens[2:])
             else:
-                return ' '.join(sent_tokens[2:])
+                return ' '.join(sent_tokens)
         else:
             return ' '.join(sent_tokens)
     else:
@@ -246,9 +250,10 @@ def clean_sentence_pass1(sent_text):
 
     """
     # Rule 1: remove ':' at the start of sentence (it is there because the begin_phrase sometimes includes ':' and sometimes not
-    if sent_text[0] == ':':
-        sent_text = sent_text[1:].strip()
-        
+    if len(sent_text) > 0:
+        if sent_text[0] == ':':
+            sent_text = sent_text[1:].strip()
+            
     # Rule 2: remove regex 'Article [some number] C' where 'C' is a capital letter
     done = False
     while not done:
