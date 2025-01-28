@@ -7,26 +7,29 @@ EU legislative documents (PDF / HTML) located on the EURLEX website.
 Website: http://eur-lex.europa.eu/
 """
 
-import fitz
-from bs4 import BeautifulSoup
-import pandas as pd
-import nltk
-nltk.download('punkt')
-from nltk.tokenize import sent_tokenize
-import string 
-from thefuzz import fuzz
-from thefuzz import process
 import os
 import re
 import argparse
 import sys
-from os.path import exists
+import string 
 
-argParser = argparse.ArgumentParser(description='EU Legislation Regulatory Text and Sentence Extractor')
-required = argParser.add_argument_group('required arguments')
-required.add_argument("-in", "--input", required=True, help="Path to directory containing PDF and / or HTML EU legislative documents as downloaded using code from: https://github.com/nature-of-eu-rules/data-extraction")
-required.add_argument("-out", "--output", required=True, help="Path to a CSV file which should store extracted sentences from the regulatory part of the input EU legislative documents found in the input folder e.g. 'path/to/sentences.csv'. ")
-args = argParser.parse_args()
+import fitz
+from bs4 import BeautifulSoup
+import pandas as pd
+
+from thefuzz import fuzz
+import nltk
+from nltk.tokenize import sent_tokenize
+nltk.download('punkt')
+nltk.download('punkt_tab')
+
+def parse_arguments():
+    argParser = argparse.ArgumentParser(description='EU Legislation Regulatory Text and Sentence Extractor')
+    required = argParser.add_argument_group('required arguments')
+    required.add_argument("-in", "--input", required=True, help="Path to directory containing PDF and / or HTML EU legislative documents as downloaded using code from: https://github.com/nature-of-eu-rules/data-extraction")
+    required.add_argument("-out", "--output", required=True, help="Path to a CSV file which should store extracted sentences from the regulatory part of the input EU legislative documents found in the input folder e.g. 'path/to/sentences.csv'. ")
+    args = argParser.parse_args()
+    return args.input, args.output
 
 def is_valid_output_dir_or_file(arg):
     if arg is None:
@@ -52,7 +55,7 @@ def is_valid_input_dir(arg):
         count = 0
         if os.path.isdir(str(arg)):
             for path in os.listdir(str(arg)):
-                if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:] in ['html', 'pdf']:
+                if os.path.isfile(os.path.join(str(arg), path)) and str(os.path.basename(os.path.join(str(arg), path))).lower()[-4:] in ['html', 'pdf', '.html', '.pdf']:
                     count += 1
             if count > 0:
                 return True, ''
@@ -60,71 +63,6 @@ def is_valid_input_dir(arg):
                 return False, 'No valid .pdf or .html files found in input directory.'
         else:
             return False, 'The specified input directory is not valid or does not exist. First create it. Type "python extract_sentences.py -h" for usage help.'
-
-is_valid_input_directory, inerrmsg = is_valid_input_dir(args.input)
-is_valid_output_directory_or_file, errmsg = is_valid_output_dir_or_file(args.output)
-
-if not is_valid_output_directory_or_file:
-     sys.exit(errmsg)
-
-if not is_valid_input_directory:
-     sys.exit(inerrmsg)
-
-INPUT_DIR = str(args.input)
-OUTPUT_FILE = str(args.output)
-
-# Dictionary of phrases which denote the start and end point
-# of relevant text in the documents
-BEGIN_PHRASE_R1 = "HAS ADOPTED THIS REGULATION"
-BEGIN_PHRASE_R2 = "HAVE ADOPTED THIS REGULATION"
-BEGIN_PHRASE_R3 = "HAVE ADOPTED THE FOLLOWING REGULATION"
-BEGIN_PHRASE_R4 = "HAS ADOPTED THE FOLLOWING REGULATION"
-
-BEGIN_PHRASE_D1 = "HAS DECIDED AS FOLLOWS"
-BEGIN_PHRASE_D2 = "HAVE ADOPTED THIS DECISION"
-BEGIN_PHRASE_D3 = "HAS ADOPTED THIS DECISION"
-BEGIN_PHRASE_D4 = "HAVE DECIDED AS FOLLOWS"
-BEGIN_PHRASE_D5 = "HAVE ADOPTED THE FOLLOWING DECISION"
-BEGIN_PHRASE_D6 = "HAS ADOPTED THE FOLLOWING DECISION"
-BEGIN_PHRASE_D1 = "DECIDED AS FOLLOWS"
-
-BEGIN_PHRASE_L1 = "HAS ADOPTED THIS DIRECTIVE"
-BEGIN_PHRASE_L2 = "HAVE ADOPTED THIS DIRECTIVE"
-BEGIN_PHRASE_L3 = "HAVE ADOPTED THE FOLLOWING DIRECTIVE"
-BEGIN_PHRASE_L4 = "HAS ADOPTED THE FOLLOWING DIRECTIVE"
-
-BEGIN_PHRASES = [
-    BEGIN_PHRASE_R1,
-    BEGIN_PHRASE_R2,
-    BEGIN_PHRASE_R3,
-    BEGIN_PHRASE_R4,
-    BEGIN_PHRASE_D1,
-    BEGIN_PHRASE_D2,
-    BEGIN_PHRASE_D3,
-    BEGIN_PHRASE_D4,
-    BEGIN_PHRASE_D5,
-    BEGIN_PHRASE_D6,
-    BEGIN_PHRASE_L1,
-    BEGIN_PHRASE_L2,
-    BEGIN_PHRASE_L3,
-    BEGIN_PHRASE_L4
-]
-
-# Other constants
-EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
-EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,', 'in all other cases,']
-START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
-# END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
-END_PHRASES = ["Done at", "DONE AT"]
-DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
-DIGITS = '0123456789'
-
-notexts1_html = []
-notexts2_html = []
-notexts1_pdf = []
-notexts2_pdf = []
-culprits = []
-trouble_sents = []
 
 # BEGIN: function definitions
 
@@ -150,7 +88,7 @@ def get_index_of_next_upper_case_token(sent_tokens, start_index = 3):
             return i
     return -1
 
-def is_valid_sentence(sent_text):
+def is_valid_sentence(sent_text, start_tokens, digits, excl_phrases, excl_start_phrases):
     """Determines whether a sentence in a text can possibly be regulatory.
 
         Parameters
@@ -163,15 +101,12 @@ def is_valid_sentence(sent_text):
             True if the sentence could possibly be regulatory, False otherwise.
 
     """
-    global DIGITS
-    global EXCLUDED_PHRASES
-    global EXCLUDED_START_PHRASES
 
     is_valid = True
     
     # Rule 1: sentence should not start with any punctuation character (or numerical digit)
     if len(sent_text) > 0:
-        if sent_text[0] in (string.punctuation + DIGITS):
+        if sent_text[0] in (string.punctuation + digits):
             is_valid = False
         
     # Rule 2: check if 'EN Official Journal' or 'PAGE' occurs at start of sentence (this indicates an invalid sentence)
@@ -183,19 +118,19 @@ def is_valid_sentence(sent_text):
         is_valid = False
 
     # Rule 4: sentence must not include these phrases (these phrases indicate non-regulatory sentences)
-    for phrase in EXCLUDED_PHRASES:
-        cs = clean_sentence_pass2(sent_text).lower()
+    for phrase in excl_phrases:
+        cs = clean_sentence_pass2(sent_text, start_tokens).lower()
         if (phrase in sent_text.lower()) or (phrase in cs) or (len(cs.split()) < 3):
             is_valid = False
 
     # Rule 5: sentence must not include these phrases AT THE START of the sentence        
-    for start_phrase in EXCLUDED_START_PHRASES:
+    for start_phrase in excl_start_phrases:
         if sent_text.lower().startswith(start_phrase):
             is_valid = False
         
     return is_valid
             
-def clean_sentence_pass2(sent):
+def clean_sentence_pass2(sent, start_tokens):
     """Formats a sentence to be more easily processed downstream for classifying them as regulatory or not.
 
         Parameters
@@ -208,13 +143,12 @@ def clean_sentence_pass2(sent):
             The processed sentence.
 
     """
-    global START_TOKENS
 
     # Remove unncessary tokens at beginning of sentence e.g.
     # "Article 4    Heading of Article... now starts the relevant part of the sentence"
     sent_tokens = sent.split()
     if len(sent_tokens) > 0:
-        if sent_tokens[0].strip() in START_TOKENS:
+        if sent_tokens[0].strip() in start_tokens:
 
             if sent_tokens[1].strip().isnumeric():
                 if len(sent_tokens) < 3:
@@ -267,7 +201,7 @@ def clean_sentence_pass1(sent_text):
 
     return sent_text.strip()
     
-def extract_summary(text):
+def extract_summary(text, start_tokens, digits, excl_phrases, excl_start_phrases):
     """Formats a text string for easy sentence tokenization and labelling / classification later.
 
         Parameters
@@ -285,13 +219,12 @@ def extract_summary(text):
     new_sent_list = []
     for sent in sent_list:
         tmp_sent = clean_sentence_pass1(sent)
-        if is_valid_sentence(tmp_sent):
-            new_sent_list.append(clean_sentence_pass2(tmp_sent))
+        if is_valid_sentence(tmp_sent, start_tokens, digits, excl_phrases, excl_start_phrases):
+            new_sent_list.append(clean_sentence_pass2(tmp_sent, start_tokens))
 
     return '\n\n\n'.join(new_sent_list)
 
-def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
-    global notexts1_pdf, notexts2_pdf
+def extract_text_from_pdf(filename, start_tokens, digits, excl_phrases, excl_start_phrases, begin_phrases, end_phrases):
     """ Extracts only the raw text of PDF document that occurs between the two given phrases. 
         
             Gives only the first occurrence
@@ -315,7 +248,6 @@ def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END
     
     if filename.endswith('.pdf'):
         text = ""
-        title = filename.split(".")[0].split("/")[-1]
 
         with fitz.open(filename) as doc:
             for page in doc:
@@ -330,16 +262,12 @@ def extract_text_from_pdf(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END
                     the_match = matches[0]
                     the_match = the_match.replace("\n", " ")
                     the_match = the_match.replace("­ ", "")
-                    simpler_text = extract_summary(the_match)
-                    if len(simpler_text) < 15:
-                        notexts1_pdf.append(title)
+                    simpler_text = extract_summary(the_match, start_tokens, digits, excl_phrases, excl_start_phrases)
                     return simpler_text
             
-    notexts2_pdf.append(title)
     return ''
 
-def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES):
-    global notexts1_html, notexts2_html
+def extract_text_from_html(filename, start_tokens, digits, excl_phrases, excl_start_phrases, begin_phrases, end_phrases):
     """ Extracts only the raw text of HTML document that occurs between the two given phrases. 
         
             Gives only the first occurrence
@@ -362,8 +290,6 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
     """
     
     if filename.endswith('.html'):
-        title = filename.split(".")[0].split("/")[-1]
-
         # Opening the html file
         html_file = open(filename, "r")
         # Reading the file
@@ -379,12 +305,9 @@ def extract_text_from_html(filename, begin_phrases=BEGIN_PHRASES, end_phrases=EN
                     the_match = matches[0]
                     the_match = the_match.replace("\n", " ")
                     the_match = the_match.replace("­ ", "")
-                    simpler_text = extract_summary(the_match)
-                    if len(simpler_text) < 15:
-                        notexts1_html.append(title)
+                    simpler_text = extract_summary(the_match, start_tokens, digits, excl_phrases, excl_start_phrases)
                     return simpler_text
                 
-    notexts2_html.append(title)
     return ''
 
 def remove_stop_words(text):
@@ -445,7 +368,7 @@ def get_doc_lengths(text):
     
     return word_count, sent_count
 
-def get_deontic_type(sent, deontics=DEONTICS):
+def get_deontic_type(sent, deontics):
     """ Identifies which deontic words appear in a given sentence.
 
         Parameters
@@ -470,9 +393,7 @@ def get_deontic_type(sent, deontics=DEONTICS):
     else:
         return ' | '.join(result)
     
-def identify_info(filename, text, deontics=DEONTICS):
-    global culprits
-    global trouble_sents
+def identify_info(filename, text, deontics, excl_phrases):
     """ Extracts metadata and sentences from a document
 
         Parameters
@@ -499,30 +420,24 @@ def identify_info(filename, text, deontics=DEONTICS):
     rows = []
     sents = text.split('\n\n\n')
     doc_format = 'pdf' if filename.endswith('.pdf') else 'html'
-    d = '.'+doc_format
     # Filter out sentences that include negative flags for regulatory text
     for sent in sents:
         exclude = False
-        for item in EXCLUDED_PHRASES:
+        for item in excl_phrases:
             if fuzz.ratio(sent.strip(), item) >= 90:
-                trouble_sents.append([filename.replace(d,''), sent])
                 exclude = True
         
         if not exclude:
             current_row = []
             current_row.append(filename.replace('.pdf','').replace('.html','')) # celex number (identifier) of document
             current_row.append(sent.strip()) # sentence text
-            deontic_types = get_deontic_type(sent.strip())
+            deontic_types = get_deontic_type(sent.strip(), deontics)
             current_row.append(deontic_types) # deontic types in the sentence
             current_row.append(word_count) # word count in document
             current_row.append(sentence_count) # sentence count in document
             current_row.append(doc_format) # PDF or HTML?
             if deontic_types != 'None':
                 rows.append(current_row)
-
-    if len(rows) == 0:
-        d = '.'+doc_format
-        culprits.append(filename.replace(d, ''))
         
     return rows
 
@@ -532,17 +447,86 @@ def identify_info(filename, text, deontics=DEONTICS):
 #    -> Also used as training data for few shot text classifier
 # 2. Evaluation of rule-based NLP dependency parser analysis algorithm (regulatory (1) or constitutive (0) and attribute label)
 
-rows = []
-# Process documents
-with os.scandir(INPUT_DIR) as iter:
-    for i, filename in enumerate(iter):
-        if filename.name.lower().endswith('.pdf') or filename.name.lower().endswith('.html'):
-            if filename.name.lower().endswith('.pdf'): # PDFs
-                new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name))
-            elif filename.name.lower().endswith('.html'): # HTMLs
-                new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name))
-            rows.extend(identify_info(filename.name, new_doc))
+def main(input_path, output_path):
+    is_valid_input_directory, inerrmsg = is_valid_input_dir(input_path)
+    is_valid_output_directory_or_file, errmsg = is_valid_output_dir_or_file(output_path)
 
-# Write dataframe to file
-df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
-df.to_csv(OUTPUT_FILE, index=False)
+    if not is_valid_output_directory_or_file:
+        sys.exit(errmsg)
+
+    if not is_valid_input_directory:
+        sys.exit(inerrmsg)
+
+    INPUT_DIR = str(input_path)
+    OUTPUT_FILE = str(output_path)
+
+    # Dictionary of phrases which denote the start and end point
+    # of relevant text in the documents
+    BEGIN_PHRASE_R1 = "HAS ADOPTED THIS REGULATION"
+    BEGIN_PHRASE_R2 = "HAVE ADOPTED THIS REGULATION"
+    BEGIN_PHRASE_R3 = "HAVE ADOPTED THE FOLLOWING REGULATION"
+    BEGIN_PHRASE_R4 = "HAS ADOPTED THE FOLLOWING REGULATION"
+
+    BEGIN_PHRASE_D1 = "HAS DECIDED AS FOLLOWS"
+    BEGIN_PHRASE_D2 = "HAVE ADOPTED THIS DECISION"
+    BEGIN_PHRASE_D3 = "HAS ADOPTED THIS DECISION"
+    BEGIN_PHRASE_D4 = "HAVE DECIDED AS FOLLOWS"
+    BEGIN_PHRASE_D5 = "HAVE ADOPTED THE FOLLOWING DECISION"
+    BEGIN_PHRASE_D6 = "HAS ADOPTED THE FOLLOWING DECISION"
+    BEGIN_PHRASE_D1 = "DECIDED AS FOLLOWS"
+
+    BEGIN_PHRASE_L1 = "HAS ADOPTED THIS DIRECTIVE"
+    BEGIN_PHRASE_L2 = "HAVE ADOPTED THIS DIRECTIVE"
+    BEGIN_PHRASE_L3 = "HAVE ADOPTED THE FOLLOWING DIRECTIVE"
+    BEGIN_PHRASE_L4 = "HAS ADOPTED THE FOLLOWING DIRECTIVE"
+
+    BEGIN_PHRASES = [
+        BEGIN_PHRASE_R1,
+        BEGIN_PHRASE_R2,
+        BEGIN_PHRASE_R3,
+        BEGIN_PHRASE_R4,
+        BEGIN_PHRASE_D1,
+        BEGIN_PHRASE_D2,
+        BEGIN_PHRASE_D3,
+        BEGIN_PHRASE_D4,
+        BEGIN_PHRASE_D5,
+        BEGIN_PHRASE_D6,
+        BEGIN_PHRASE_L1,
+        BEGIN_PHRASE_L2,
+        BEGIN_PHRASE_L3,
+        BEGIN_PHRASE_L4
+    ]
+
+    # Other constants
+    EXCLUDED_PHRASES = ["shall apply", "shall mean", "this regulation shall apply", "shall be binding in its entirety and directly applicable in the member states", "shall be binding in its entirety and directly applicable in all member states", "shall enter into force", "shall be based", "within the meaning", "shall be construed", "shall take effect"]
+    EXCLUDED_START_PHRASES = ['amendments to decision', 'amendments to implementing decision', 'in this case,', 'in such a case,', 'in such cases,', 'in all other cases,']
+    START_TOKENS = ['Article', 'Chapter', 'Section', 'ARTICLE', 'CHAPTER', 'SECTION', 'Paragraph', 'PARAGRAPH']
+    # END_PHRASES = ["Done at Brussels", "Done at Luxembourg", "Done at Strasbourg", "Done at Frankfurt"]
+    END_PHRASES = ["Done at", "DONE AT"]
+    DEONTICS = ['shall ', 'must ', 'shall not ', 'must not ']
+    DIGITS = '0123456789'
+
+    rows = []
+    # Process documents
+    with os.scandir(INPUT_DIR) as iter:
+        for i, filename in enumerate(iter):
+            if filename.name.lower().endswith('.pdf') or filename.name.lower().endswith('.html'):
+                if filename.name.lower().endswith('.pdf'): # PDFs
+                    new_doc = extract_text_from_pdf(os.path.join(INPUT_DIR, filename.name), start_tokens=START_TOKENS, digits=DIGITS, excl_phrases=EXCLUDED_PHRASES, excl_start_phrases=EXCLUDED_START_PHRASES, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES)
+                elif filename.name.lower().endswith('.html'): # HTMLs
+                    new_doc = extract_text_from_html(os.path.join(INPUT_DIR, filename.name), start_tokens=START_TOKENS, digits=DIGITS, excl_phrases=EXCLUDED_PHRASES, excl_start_phrases=EXCLUDED_START_PHRASES, begin_phrases=BEGIN_PHRASES, end_phrases=END_PHRASES)
+                rows.extend(identify_info(filename.name, new_doc, deontics=DEONTICS, excl_phrases=EXCLUDED_PHRASES))
+
+    # Write dataframe to file
+    df = pd.DataFrame(rows, columns=['celex', 'sent', 'deontic', 'word_count', 'sent_count', 'doc_format'])
+    df.to_csv(OUTPUT_FILE, index=False)
+
+if __name__ == "__main__":
+    input_path, output_path = parse_arguments()
+    main(input_path, output_path)
+
+
+
+
+
+
